@@ -11,6 +11,11 @@ class SideBar extends EventEmitter {
 		this.sortOrder = JSON.parse(localStorage.getItem(this.sortOrderKey)) || [];
 		localStorage.setItem(this.sortOrderKey, JSON.stringify(this.sortOrder));
 
+		document.querySelector('.add-server').addEventListener('click', () => {
+			servers.clearActive();
+			webview.showLanding();
+		});
+
 		this.listElement = document.getElementById('sidebar__servers');
 
 		Object.values(servers.hosts)

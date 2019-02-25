@@ -1,31 +1,19 @@
-import { ipcRenderer, shell } from 'electron';
+import { ipcRenderer } from 'electron';
 import attachEvents from './events';
 import servers from './servers';
 import sidebar from './sidebar';
-import webview from './webview';
 import i18n from '../i18n';
 
-export const start = async function() {
-	await i18n.initialize();
 
-	const defaultInstance = 'https://open.rocket.chat';
+const defaultInstance = 'https://open.rocket.chat';
 
-	// connection check
-	function online() {
-		document.body.classList.remove('offline');
+async function setupLanding() {
+	function updateConnectionStatus() {
+		document.body.classList[navigator.onLine ? 'remove' : 'add']('offline');
 	}
-
-	function offline() {
-		document.body.classList.add('offline');
-	}
-
-	if (!navigator.onLine) {
-		offline();
-	}
-
-	window.addEventListener('online', online);
-	window.addEventListener('offline', offline);
-	// end connection check
+	window.addEventListener('online', updateConnectionStatus);
+	window.addEventListener('offline', updateConnectionStatus);
+	updateConnectionStatus();
 
 	const form = document.querySelector('form');
 	const hostField = form.querySelector('[name="host"]');
@@ -34,11 +22,15 @@ export const start = async function() {
 
 	window.addEventListener('load', () => hostField.focus());
 
-	window.addEventListener('focus', () => webview.focusActive());
+	let state = {};
+
+	function setState(partialState) {
+		state = [...state, ...partialState];
+	}
 
 	function validateHost() {
 		return new Promise(function(resolve, reject) {
-			const execValidation = function() {
+			const execValidation = async() => {
 				invalidUrl.style.display = 'none';
 				hostField.classList.remove('wrong');
 
@@ -55,11 +47,12 @@ export const start = async function() {
 				button.value = i18n.__('landing.validating');
 				button.disabled = true;
 
-				servers.validateHost(host, 2000).then(function() {
+				try {
+					await servers.validateHost(host, 2000);
 					button.value = i18n.__('landing.connect');
 					button.disabled = false;
 					resolve();
-				}, function(status) {
+				} catch (status) {
 					// If the url begins with HTTP, mark as invalid
 					if (/^https?:\/\/.+/.test(host) || status === 'basic-auth') {
 						button.value = i18n.__('landing.invalidUrl');
@@ -80,12 +73,6 @@ export const start = async function() {
 						return;
 					}
 
-					// // If the url begins with HTTPS, fallback to HTTP
-					// if (/^https:\/\/.+/.test(host)) {
-					//     hostField.value = host.replace('https://', 'http://');
-					//     return execValidation();
-					// }
-
 					// If the url isn't localhost, don't have dots and don't have protocol
 					// try as a .rocket.chat subdomain
 					if (!/(^https?:\/\/)|(\.)|(^([^:]+:[^@]+@)?localhost(:\d+)?$)/.test(host)) {
@@ -98,23 +85,28 @@ export const start = async function() {
 						hostField.value = `https://${ host }`;
 						return execValidation();
 					}
-				});
+				}
 			};
+
 			execValidation();
 		});
 	}
 
-	hostField.addEventListener('blur', function() {
-		validateHost().then(function() {}, function() {});
+	hostField.addEventListener('blur', async() => {
+		await validateHost();
 	});
 
-	ipcRenderer.on('certificate-reload', function(event, url) {
+	ipcRenderer.on('certificate-reload', async(event, url) => {
 		hostField.value = url.replace(/\/api\/info$/, '');
-		validateHost().then(function() {}, function() {});
+		await validateHost();
 	});
 
-	const submit = function() {
-		validateHost().then(function() {
+	form.addEventListener('submit', async(event) => {
+		event.preventDefault();
+		event.stopPropagation();
+
+		try {
+			await validateHost();
 			const input = form.querySelector('[name="host"]');
 			let url = input.value;
 
@@ -129,37 +121,14 @@ export const start = async function() {
 			}
 
 			input.value = '';
-		}, function() {});
-	};
-
-	hostField.addEventListener('keydown', function(ev) {
-		if (ev.which === 13) {
-			ev.preventDefault();
-			ev.stopPropagation();
-			submit();
-			return false;
+		} catch (e) {
+			console.error(e);
 		}
 	});
+}
 
-	form.addEventListener('submit', function(ev) {
-		ev.preventDefault();
-		ev.stopPropagation();
-		submit();
-		return false;
-	});
-
-	document.querySelector('.add-server').addEventListener('click', () => {
-		servers.clearActive();
-		webview.showLanding();
-	});
-
-	document.addEventListener('click', (event) => {
-		const anchorElement = event.target.closest('a[rel="noopener noreferrer"]');
-		if (anchorElement) {
-			shell.openExternal(anchorElement.href);
-			event.preventDefault();
-		}
-	});
-
-	attachEvents();
-};
+export async function start() {
+	await i18n.initialize();
+	await setupLanding();
+	await attachEvents();
+}
